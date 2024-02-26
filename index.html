@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Live | Hacker News</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="https://news.ycombinator.com/y18.svg">
+</head>
+<body>
+  <div id="main">
+    <header>
+      <img src="https://news.ycombinator.com/y18.svg" class="logo">
+      <b><a href="https://news.ycombinator.com/news">Hacker News</a></b>
+      &nbsp;&nbsp;
+      <a href="https://news.ycombinator.com/newest">new</a>&nbsp;|
+      threads |&nbsp;
+      <a href="https://news.ycombinator.com/front">past</a>&nbsp;|&nbsp;
+      <a href="https://news.ycombinator.com/newcomments">comments</a>&nbsp;|&nbsp;
+      <a href="https://news.ycombinator.com/ask">ask</a>&nbsp;|&nbsp; 
+      <a href="https://news.ycombinator.com/show">show</a>&nbsp;|&nbsp;
+      <a href="https://news.ycombinator.com/jobs">jobs</a>&nbsp;|&nbsp;
+      <a href="https://news.ycombinator.com/submit">submit</a>&nbsp;|&nbsp;
+      <a href="#" class="current">live</a>
+      <span class="right">
+        <a href="https://github.com/jerbear2008/hn-live">repo</a>
+      </span>
+    </header>
+    <noscript>This feed needs JavaScript enabled to load.</noscript>
+    <main></main>
+  </div>
+
+  <style>
+    body {
+      font-family: Verdana, Geneva, sans-serif;
+      font-size: 10pt;
+    }
+    a {
+      color: inherit;
+    }
+    
+    #main {
+      width: clamp(85%, 796px, 100%);
+      margin: 0 auto;
+      background-color: #f6f6ef;
+      padding-bottom: 3px;
+      min-height: 100px;
+    }
+    header {
+      background-color: #ff6600;
+      padding: 2px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      white-space: nowrap;
+      * {
+        display: block;
+      }
+      .logo {
+          width: 18px;
+          border: 1px white solid;
+          margin-right: 7px;
+      }
+      a {
+        text-decoration: none;
+      }
+      .current {
+        color: white;
+      }
+      .right {
+        margin-left: auto;
+        margin-right: 2px;
+      }
+    }
+  </style>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.9.3/firebase-app.js'
+    import { getDatabase, ref, onValue, get } from 'https://www.gstatic.com/firebasejs/9.9.3/firebase-database.js'
+    
+    initializeApp({
+      databaseURL: 'https://hacker-news.firebaseio.com',
+    })
+    const db = getDatabase()
+    
+    
+    window.customElements.define(
+      'hn-item',
+      class extends HTMLElement {
+        constructor() {
+          super()
+          this.attachShadow({ mode: 'open' })
+          if (this.id !== null) this.load()
+        }
+        #id = null
+        get id() { return this.#id }
+        set id(newId) {
+          if (newId === this.#id) return
+          this.#id = newId
+          this.setAttribute('id', String(newId))
+          if (this.id) {
+            this.shadowRoot.textContent = ''
+            this.load()
+          }
+        }
+        static observedAttributes = ['id']
+        attributeChangedCallback(name, oldValue, newValue) {
+          if (name === 'id' && newValue !== this.id) {
+            this.id = Number(newValue)
+          }
+        }
+        
+        async load() {
+          const id = this.id
+          if (!id) throw new Error('No id set')
+          const reference = ref(db, `v0/item/${id}`)
+          const snapshot = await get(reference)
+          const data = snapshot.val()
+          
+          if (id !== this.id) return // No longer needed
+          if (data === null) { // retry
+            // console.log('Queueing a retry for fetching', id)
+            setTimeout(() => this.load(), 200)
+            return
+          }
+          
+          const targetTimestamp = (data.time * 1000) + 30000
+          const timeToWait = Math.max(0, targetTimestamp - Date.now());
+    
+          if (timeToWait > 0) {
+            await new Promise(resolve => setTimeout(resolve, timeToWait));
+          } else {
+            // console.warn("Didn't need to wait, for some reason.", data)
+          }
+          
+          if (id !== this.id) return // No longer needed
+          
+          switch (data.type) {
+            case 'comment':
+            case 'pollopt':
+              this.renderComment(data)
+              break
+            case 'story':
+            case 'ask':
+            case 'job':
+            case 'poll':
+              this.renderStory(data)
+              break
+            default:
+              throw new Error(`Unknown item type: ${data.type}\n${JSON.stringify(data)}`)
+          }
+        }
+        renderComment(data) {
+          const template = document.getElementById(
+            'comment-template',
+          ).content.cloneNode(true)
+          
+          const userLink = template.getElementById('comment-user')
+          userLink.innerText = data.by
+          userLink.setAttribute('href', `https://news.ycombinator.com/user?id=${data.by}`)
+          
+          const timeLink = template.getElementById('comment-time')
+          timeLink.setAttribute('href', `https://news.ycombinator.com/item?id=${data.id}`)
+          
+          const parentLink = template.getElementById('comment-parent')
+          parentLink.setAttribute('href', `https://news.ycombinator.com/item?id=${data.parent}`)
+          
+          const bodyElement = template.getElementById('comment-body')
+          bodyElement.innerHTML = data.text
+    
+          this.shadowRoot.appendChild(template)
+        }
+        renderStory(data) {
+          if (data.dead) data.title = '[dead]'
+          const template = document.getElementById(
+            'story-template',
+          ).content.cloneNode(true)
+          const hasUrl = 'url' in data
+          
+          const titleLink = template.getElementById('story-title')
+          titleLink.innerText = data.title
+          if (hasUrl) titleLink.setAttribute('href', data.url)
+    
+          const domainLink = template.getElementById('story-domain')
+          if (hasUrl) {
+            const domain = new URL(data.url).hostname.replace(/^www./, '')
+            domainLink.innerText = domain
+            domainLink.setAttribute('href', `https://news.ycombinator.com/from?site=${domain}`)
+          }
+          
+          const pointsElement = template.getElementById('story-points')
+          pointsElement.innerText = `${data.score} point${data.score === 1 ? '' : 's'}`
+    
+          const userLink = template.getElementById('story-user')
+          userLink.innerText = data.by
+          userLink.setAttribute('href', `https://news.ycombinator.com/user?id=${data.by}`)
+    
+          const timeLink = template.getElementById('story-time')
+          timeLink.setAttribute('href', `https://news.ycombinator.com/item?id=${data.id}`)
+          
+          const pastLink = template.getElementById('story-past')
+          if (hasUrl) {
+            pastLink.setAttribute('href', `https://hn.algolia.com/?query=${encodeURIComponent(data.title)}&type=story&dateRange=all&sort=byDate&storyText=false&prefix&page=0`)
+          }
+    
+          const commentsLink = template.getElementById('story-comments')
+          commentsLink.setAttribute('href', `https://news.ycombinator.com/item?id=${data.id}`)
+          commentsLink.innerText = `${(data.kids ?? []).length} comments`
+    
+          this.shadowRoot.appendChild(template)
+          
+          if (!hasUrl) {
+            // must do this after it's on the DOM?
+            pastLink.parentNode.removeChild(pastLink.previousSibling)
+            pastLink.remove()
+            
+            domainLink.parentNode.removeChild(domainLink.previousSibling)
+            domainLink.parentNode.removeChild(domainLink.nextSibling)
+            domainLink.remove()
+          }
+        }
+      },
+    )
+    
+    const itemElementContainer = document.querySelector('main')
+    
+    let maxItem = NaN
+    onValue(ref(db, 'v0/maxitem'), async (snapshot) => {
+      const newMaxItem = snapshot.val()
+      const lastMaxItem = maxItem || newMaxItem - 50
+      maxItem = newMaxItem
+      
+      console.log('Got', newMaxItem - lastMaxItem, 'new items')
+      
+      await new Promise(r => setTimeout(r, 500))
+      await customElements.whenDefined('hn-item')
+      for (let i = lastMaxItem + 1; i <= newMaxItem; i++) {
+        const itemElement = document.createElement('hn-item')
+        itemElement.id = i
+        itemElementContainer.prepend(itemElement)
+      }
+    })
+  </script>
+  
+  <template id="comment-template">
+    <article class="comment">
+      <img class="comment-upvote" src="https://news.ycombinator.com/triangle.svg" alt="" />
+      <div>
+        <div class="comment-header">
+          <a id="comment-user" href="https://news.ycombinator.com/user?id=[username]">[username]</a>
+          <a id="comment-time" href="https://news.ycombinator.com/item?id=[id]">0 minutes ago</a>
+          |
+          <a id="comment-parent" href="https://news.ycombinator.com/item?id=[parent id]">parent</a>
+        </div>
+        <div class="comment-body" id="comment-body">[comment body HTML]</div>
+      </div>
+    </article>
+    <style>
+      .comment {
+        margin-left: 8px;
+        margin-bottom: 20px;
+        font-size: 9pt;
+        display: flex;
+        align-items: flex-start;
+      }
+      .comment-upvote {
+        width: 10px;
+        margin-right: 7px;
+        margin-top: 1px;
+      }
+      .comment-header {
+        font-size: 8pt;
+        color: #828282;
+        margin-bottom: 6px;
+        a {
+          text-decoration: none;
+          &:hover {
+            text-decoration: underline;
+          }
+        }
+      }
+      .comment-body {
+        a:visited {
+          color: #828282;
+        }
+      }
+      a {
+        color: inherit;
+      }
+      p {
+        margin-top: 8px;
+        margin-bottom: 0px;
+      }
+    </style>
+  </template>
+  
+  <template id="story-template">
+    <article class="story">
+      <img class="story-upvote" src="https://news.ycombinator.com/triangle.svg" alt="" />
+      <div>
+        <div class="story-titleline">
+          <a class="story-title" id="story-title">[title]</a>
+          <span class="story-domain">(<a id="story-domain" href="https://news.ycombinator.com/from?site=[domain]">[domain]</a>)</span>
+        </div>
+        <div class="story-subline">
+          <span id="story-points">[points]</span>
+          by
+          <a id="story-user" href="https://news.ycombinator.com/user?id=[username]">[username]</a>
+          <a id="story-time" href="https://news.ycombinator.com/item?id=[id]">0 minutes ago</a>
+          |
+          <a id="story-past" href="https://hn.algolia.com/?query=[title]&type=story&dateRange=all&sort=byDate&storyText=false&prefix&page=0">past</a>
+          |
+          <a id="story-comments" href="https://news.ycombinator.com/item?id=[id]">0 comments</a>
+        </div>
+      </div>
+    </article>
+    <style>
+      .story {
+        margin-left: 9px;
+        margin-bottom: 20px;
+        font-size: 10pt;
+        display: flex;
+        align-items: flex-start;
+        a {
+          text-decoration: none;
+          &:hover {
+            text-decoration: underline;
+          }
+        }
+        p {
+          margin-top: 8px;
+          margin-bottom: 0px;
+        }
+      }
+      .story-upvote {
+        width: 10px;
+        margin-right: 7px;
+        margin-top: 1px;
+      }
+      .story-titleline {
+        margin-bottom: 5px;
+      }
+      .story-title {
+        a:visited {
+          color: #828282;
+        }
+      }
+      .story-domain {
+        color: #828282;
+        font-size: 8pt;
+      }
+      .story-subline {
+        font-size: 7pt;
+        color: #828282;
+        margin-bottom: 6px;
+      }
+      a {
+        color: inherit;
+      }
+    </style>
+  </template>
+</body>
+</html>
