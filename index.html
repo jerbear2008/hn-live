@@ -159,6 +159,8 @@
           userLink.setAttribute('href', `https://news.ycombinator.com/user?id=${data.by}`)
           
           const timeLink = template.getElementById('comment-time')
+          const minutesAgo = Math.floor((Date.now() - data.time * 1000) / (1000 * 60))
+          timeLink.innerText = `${minutesAgo} minute${minutesAgo === 1 ? '' : 's'} ago`
           timeLink.setAttribute('href', `https://news.ycombinator.com/item?id=${data.id}`)
           
           const parentLink = template.getElementById('comment-parent')
@@ -195,6 +197,8 @@
           userLink.setAttribute('href', `https://news.ycombinator.com/user?id=${data.by}`)
     
           const timeLink = template.getElementById('story-time')
+          const minutesAgo = Math.floor((Date.now() - data.time * 1000) / (1000 * 60))
+          timeLink.innerText = `${minutesAgo} minute${minutesAgo === 1 ? '' : 's'} ago`
           timeLink.setAttribute('href', `https://news.ycombinator.com/item?id=${data.id}`)
           
           const pastLink = template.getElementById('story-past')
